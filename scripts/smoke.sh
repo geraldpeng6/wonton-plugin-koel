@@ -43,15 +43,9 @@ SMOKE_JAR="$copy/.wonton/session.cookies"
 SMOKE_TOOLS="$work/tools.json"
 PROBES_LOG="$LOG"
 
-# #121：宿主机配了 Docker 客户端代理时，容器会带上 HTTP_PROXY，Hydra 的回环健康检查一直失败。
-# 去掉 config.json 的 proxies，其余（凭据、context）留着。
-docker_config="${DOCKER_CONFIG:-$HOME/.docker}"
-if [[ -f "$docker_config/config.json" ]]; then
-  mkdir -p "$work/docker-config"
-  cp -a "$docker_config/." "$work/docker-config/"
-  jq 'del(.proxies)' "$docker_config/config.json" >"$work/docker-config/config.json"
-  export DOCKER_CONFIG="$work/docker-config"
-fi
+# #121：宿主机给 Docker 客户端配了代理时，容器会带上 HTTP_PROXY，Hydra 的回环健康检查一直失败。
+# 剥代理的逻辑在 lib.sh 的 strip_docker_proxies，副本放在 $work 里跟着清理。
+strip_docker_proxies "$work/docker-config"
 
 cleanup() {
   local image=""
