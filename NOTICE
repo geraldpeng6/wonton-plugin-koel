@@ -1,14 +1,16 @@
-图标
-====
+Koel 标志
+=========
 
-`icon.svg` 为本仓库原创，按插件规范的线条风格手写，未用图片模型生成。从模板新建的插件换成自己的图标时，这里按实际情况重写。
+图标：Koel
+来源：https://github.com/koel/koel/blob/master/resources/assets/img/logo.svg
+版权：Koel 以 MIT 许可证发布（https://github.com/koel/koel/blob/master/LICENSE），版权归 Phan An 和 Koel 贡献者所有。
+处理：官方 logo.svg 等比放在白色正方形底上（viewBox 443×443 平移居中到 512×512），不改颜色、比例或图形，不带透明边、圆角或阴影。
 
-许可证
-------
+上游许可证全文
 
 MIT License
 
-Copyright (c) 2026 Wonton plugin authors
+Copyright (c) 2015 Phan An
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -27,3 +29,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+商标
+
+Koel 名称和标志归 Koel 项目及其权利人所有。这里只用它们标识本插件集成的应用，不表示与上游存在官方合作、隶属关系或获得其背书。软件许可证不授予商标权。

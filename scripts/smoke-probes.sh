@@ -1,26 +1,48 @@
 # shellcheck shell=bash
-# scripts/smoke.sh 的一项一项探测，跟着插件走。没写的项会 FAIL 并给出写法，不会默认放行。
-#
-# 页面：web_assert 从标准输入读页面，命中的确是应用的真实页面时返回 0。
-# 身份：identity_check 用应用自己的“当前用户”接口断言认出的是用户管理员。没有用户体系时写 IDENTITY_NA=1，
-#       并在 SMOKE_NOTE 里写原因。dweb / web_get 是带用户会话的请求助手，可继续走应用自己的登录链。
-# 工具：MCP_TOOL 写一个只读工具名（可带插件前缀），MCP_ARGS 是 JSON 参数；mcp_assert 从标准输入读调用结果。
-#       要断言多个工具时改成写 mcp_check；调用前要备数据时写 before_mcp。
-# 数据：合并前要验证“升级/重装不丢用户数据”时写 data_write 和 data_check（两个都写才跑）：data_write 用随机标记写
-#       一条数据并把标记原样存进 $SMOKE_STATE，data_check 读回标记去应用里找，对不上就打印看到了什么并返回非 0。
-#       应用不存用户数据时写 DATA_NA=1（两项记 N/A）。
-# 装之前要准备（如先配出口代理）：写 before_install。
+# Koel：sso=none——登录用应用自己的邮箱账号。上游镜像首次初始化种下写死的默认管理员
+# admin@koel.dev / KoelIsCool（没有配置项可改，README 里有说明），身份探测就用它登录。
+# 网页和应用接口都经核心网关（请求要带用户会话）；应用自己的接口再加 Koel 的 Bearer 令牌。
 
-web_assert() { grep -q '你好'; }   # 示例页的标题
+web_assert() { grep -qi 'koel'; }   # 标准输入：SPA 首页 HTML
 
-identity_check() { # 页面回显的就是网关注入的用户名
-  local page
-  page="$(dweb /)" || { echo "页面失败：$page"; return 1; }
-  grep -qF "你好，$SMOKE_OWNER" <<<"$page" || { echo "页面没回显用户 $SMOKE_OWNER：$(head -c 120 <<<"$page")"; return 1; }
+koel_login() { # 登录默认管理员，输出 Bearer 令牌
+  local resp
+  resp="$(curl -sS --noproxy '*' -b "$SMOKE_JAR" -H 'Content-Type: application/json' \
+    -d '{"email":"admin@koel.dev","password":"KoelIsCool"}' "$SMOKE_WEB_URL/api/me")" ||
+    { echo "登录请求失败"; return 1; }
+  local token
+  token="$(jq -r '.token // empty' <<<"$resp")"
+  [[ -n "$token" ]] || { echo "登录没有返回 token：$resp"; return 1; }
+  printf '%s' "$token"
 }
 
-# 数据：合并前要验证“升级/重装不丢用户数据”时写 data_write 和 data_check（两个都写才跑）：
-#   data_write 用随机标记写一条数据，把标记原样存进 $SMOKE_STATE；data_check 读回标记、去应用里找，
-#   找不到就打印看到了什么并返回非 0。
-# 应用不存用户数据时写 DATA_NA=1（两项记 N/A）。模板的示例页不存数据，所以这里是不适用。
-export DATA_NA=1
+identity_check() { # 应用自己的当前用户接口：认出的是管理员
+  local token me
+  token="$(koel_login)" || return 1
+  me="$(curl -sS --noproxy '*' -b "$SMOKE_JAR" -H "Authorization: Bearer $token" -H 'Accept: application/json' \
+    "$SMOKE_WEB_URL/api/me")" || { echo "GET /api/me 失败：$me"; return 1; }
+  jq -e '.is_admin == true and .role == "admin"' <<<"$me" >/dev/null ||
+    { echo "当前用户不是管理员：$me"; return 1; }
+}
+
+data_write() { # 建一个带随机标记的歌单，把标记原样写进 $SMOKE_STATE（覆盖写）
+  local token resp marker
+  marker="wonton-smoke-$(date +%s)-$RANDOM"
+  token="$(koel_login)" || return 1
+  resp="$(curl -sS --noproxy '*' -b "$SMOKE_JAR" -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$marker\"}" "$SMOKE_WEB_URL/api/playlists")" || { echo "建歌单失败：$resp"; return 1; }
+  jq -e --arg m "$marker" '(if type == "object" and has("data") then .data else . end).name == $m' <<<"$resp" >/dev/null ||
+    { echo "建歌单回显对不上：$resp"; return 1; }
+  printf '%s' "$marker" > "$SMOKE_STATE"
+}
+
+data_check() { # 从 $SMOKE_STATE 读回标记，去应用里找回带标记的歌单
+  local token playlists marker
+  marker="$(cat "$SMOKE_STATE" 2>/dev/null)"
+  [[ -n "$marker" ]] || { echo "没有标记或标记为空"; return 1; }
+  token="$(koel_login)" || return 1
+  playlists="$(curl -sS --noproxy '*' -b "$SMOKE_JAR" -H "Authorization: Bearer $token" -H 'Accept: application/json' \
+    "$SMOKE_WEB_URL/api/playlists")" || { echo "列歌单失败：$playlists"; return 1; }
+  jq -e --arg m "$marker" '(if type == "array" then . else (.data // [.]) end) | map(.name) | index($m)' <<<"$playlists" >/dev/null ||
+    { echo "歌单里找不到标记 $marker：$(head -c 300 <<<"$playlists")"; return 1; }
+}

@@ -1,78 +1,133 @@
-# 示例插件：nginx 显示一个网页，向登录的人问好。改成自己的应用见 https://github.com/geraldpeng6/wonton-docs/blob/main/develop.md#写插件。
+# Koel 音乐流媒体：用户的音乐放在共享文件夹 music 里，经核心网关访问，登录用 Koel 自带的
+# 邮箱账号（免费版的 SSO 和反代头认证都是 Koel Plus 的付费功能，见 plugin-spec 的"应用自带的登录"）。
+# 数据库用上游推荐的独立 PostgreSQL 容器（koel/docker：不含数据库，需要单独的 MariaDB/MySQL 或 PostgreSQL）。
+name: koel
+
 services:
-  web:
-    # 镜像按摘要固定（多架构镜像写清单列表的摘要），标签只给人看。
-    image: nginx:1.31.7-alpine@sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d
+  db:
+    image: postgres:17.11-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+    # Alpine 官方镜像的 postgres 用户是 70:70，核心按此准备数据库目录属主。
+    user: "70:70"
+    read_only: true
+    tmpfs: ["/tmp", "/var/run/postgresql"]
     environment:
-      # 网关代登录：SSI 回显的 Remote-User 只信核心带来的。官方镜像启动时对 templates 目录里的
-      # *.template 做 envsubst，把下面的地址换进 nginx 配置（见 web/default.conf.template）。
-      WONTON_CORE_ADDRESS: ${WONTON_CORE_ADDRESS}
-    # 包里的文件经 configs 交给容器（核心在启动前写进去），不能用卷挂载。
-    configs:
-      - source: site
-        target: /etc/nginx/templates/default.conf.template
-      - source: page
-        target: /usr/share/nginx/html/index.html
-      - source: tokens
-        target: /usr/share/nginx/html/tokens.css
+      POSTGRES_USER: koel
+      POSTGRES_PASSWORD: ${WONTON_SECRET_DB_PASSWORD:?核心没有注入数据库密码}
+      POSTGRES_DB: koel
+      TZ: ${TZ}
+    volumes:
+      - ${WONTON_APP_DATA:?核心没有注入插件数据目录}/db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      test: ["CMD", "pg_isready", "-U", "koel", "-d", "koel"]
       interval: 30s
       timeout: 5s
       start_period: 30s
-      start_interval: 1s
+      start_interval: 2s
+
+  koel:
+    image: phanan/koel:9.15.0@sha256:af1ec7daf06d22f6781d9e79716e52048108c21b05adfebccec2e474a29f6fde
+    depends_on:
+      db:
+        condition: service_healthy
+    # 上游镜像以 Apache + PHP（www-data）运行；entrypoint 覆盖后镜像 CMD 会被清掉，显式写回。
+    entrypoint: ["/bin/sh", "/wonton-start.sh"]
+    command: ["apache2-foreground"]
+    volumes:
+      - ${WONTON_SHARE_MUSIC:?核心没有授权 music 共享文件夹}:/music:ro
+      - ${WONTON_APP_DATA}/images:/var/www/html/storage/app/public/images
+      - ${WONTON_APP_DATA}/search-indexes:/var/www/html/storage/search-indexes
+      - ${WONTON_APP_DATA}/artifacts:/artifacts
+    configs:
+      - source: start
+        target: /wonton-start.sh
+    healthcheck:
+      # 首页要过 PHP 和数据库，比镜像自带的静态文件检查更真实。
+      test: ["CMD", "curl", "-f", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      start_interval: 2s
 
 configs:
-  site:
-    file: web/default.conf.template
-  page:
-    file: web/index.html
-  tokens:
-    file: web/tokens.css
+  start:
+    content: |
+      # 挂载目录由核心按 PUID:PGID 预建，PHP 以镜像内置的 www-data（uid 33）运行，属主对不上。
+      # 每次启动把挂载目录本身的属主改回 www-data：幂等，目录里的文件一直是 www-data 写的。
+      chown www-data:www-data /artifacts \
+        /var/www/html/storage/app/public/images \
+        /var/www/html/storage/search-indexes
+      # 上游 9.15.0 的 koel-init 只认 /var/www/html/.env（不认环境变量），这里每次启动
+      # 用注入的变量生成它；APP_KEY 跨升级是同一把，重跑内容不变，幂等。
+      # 写好 .env 后，原 entrypoint 里的 koel:init --no-interaction 会跑迁移、种默认管理员
+      # （admin@koel.dev / KoelIsCool，上游写死，无配置项可改）并把 MEDIA_PATH 写进应用设置，全部幂等。
+      cat > /var/www/html/.env <<WONTONENV
+      APP_KEY=base64:${WONTON_SECRET_APP_KEY:?核心没有注入应用密钥}
+      APP_URL=${WONTON_APP_URL:?核心没有注入插件网页地址}
+      DB_CONNECTION=pgsql
+      DB_HOST=db
+      DB_PORT=5432
+      DB_DATABASE=koel
+      DB_USERNAME=koel
+      DB_PASSWORD=${WONTON_SECRET_DB_PASSWORD:?核心没有注入数据库密码}
+      MEDIA_PATH=/music
+      ARTIFACTS_PATH=/artifacts
+      # 不申请 network.egress，需要外网的集成显式关掉：MusicBrainz 元数据、播客订阅、
+      # 网络电台在只有内网的环境里会一直重试、报错。Last.fm、Spotify、YouTube 没配密钥本来就是关的。
+      USE_MUSICBRAINZ=false
+      PODCASTS_ENABLED=false
+      RADIO_ENABLED=false
+      WONTONENV
+      exec /usr/local/bin/koel-entrypoint "$$@"
 
 x-wonton:
   spec: "0.5"
-  # 换成你自己的：反向域名形式，装上以后不能改。
-  id: app.example.hello
-  version: 0.1.1
+  id: dev.koel.koel
+  version: 0.1.0
   kind: app
-  title: { zh: 你好, en: Hello }
-  description: { zh: 向登录的人问好的示例网页, en: An example page that greets whoever is signed in }
+  title: { en: Koel }
+  description:
+    zh: 把共享文件夹里的音乐变成你自己的流媒体音乐库
+    en: Turn the music in your shared folder into your own streaming library
   icon: icon.svg
   notices: [NOTICE]
-  screenshots: [screenshots/home.png]
-  author: { name: Example }
-  homepage: https://nginx.org
-  # 应用（这里是 nginx）的许可证；插件包自己的许可证写在仓库的 LICENSE 里。
-  license: BSD-2-Clause
+  screenshots: [screenshots/home.png, screenshots/album.png, screenshots/player.png]
+  author: { name: geraldpeng6, url: https://github.com/geraldpeng6 }
+  homepage: https://koel.dev
+  # 应用（Koel）的许可证；插件包自己的许可证写在仓库的 LICENSE 里。
+  license: MIT
   tags:
-    zh: [工具]
-    en: [Tools]
+    zh: [音乐]
+    en: [Music]
   about:
     zh: |
-      一个示例网页：登录以后，页面会向你问好。新建插件时可以照着改。
+      把共享文件夹里的音乐整理成自己的流媒体音乐库：按歌手、专辑浏览，建歌单，看收听统计。网页在手机上也好用。
+
+      第一次打开用默认管理员登录：admin@koel.dev / KoelIsCool。登录后请立即在设置里改密码；网关挡在前面，改密码之前只有你打得开登录页。
+
+      音乐目录只读：把歌曲放进 music 共享文件夹，然后在 Koel 的设置里点扫描。网页上传需要可写的媒体目录，这里用不了。
+
+      播客、网络电台、Last.fm、MusicBrainz 元数据这些要连外网的功能默认关闭；插件不申请出网权限。单点登录（Google / OIDC）和反向代理认证是 Koel Plus 的付费功能，免费版用不了。
     en: |
-      An example page: once you are signed in, the page says hello. Copy it as a starting point for a new plugin.
-  release_notes: { zh: 名字和说明更新。, en: Product name and description update. }
+      Turn the music in your shared folder into your own streaming library: browse by artist and album, build playlists, and see listening statistics. The web app works well on phones.
+
+      The first sign-in uses the default admin account: admin@koel.dev / KoelIsCool. Change the password right away in Settings; the gateway sits in front, so before the change only you can reach the login page.
+
+      The music folder is read-only: drop songs into the music shared folder, then press Scan in Koel's settings. Uploading from the web needs a writable media folder and does not work here.
+
+      Podcasts, internet radio, Last.fm and MusicBrainz metadata need the internet and are turned off; the plugin does not ask for outbound access. Single sign-on (Google / OIDC) and reverse-proxy authentication are paid Koel Plus features and are not available in the free edition.
+  release_notes: { zh: 第一版。, en: First release. }
   webui:
-    service: web
+    service: koel
     port: 80
-    # 示例页回显网关注入的用户名，见 https://github.com/geraldpeng6/wonton-docs/blob/main/plugin-spec.md#网关代登录sso-proxy。
-    sso: proxy
-    proxy:
-      headers:
-        Remote-User: "{user}"
-  # 能放到底栏的页面，见 https://github.com/geraldpeng6/wonton-docs/blob/main/plugin-spec.md#底栏页面tabs。放不放由用户决定。
-  tabs:
-    - id: home
-      title: { zh: 主页, en: Home }
-      icon: tabs/home.svg
-      icon_selected: tabs/home-fill.svg
-      path: /
-      # 这个页面没做适配，用默认的 inset：页面夹在 App 的栏中间，不会被挡。
-      # 想让内容从栏下滚过，写 layout: edge-to-edge，并用 --wonton-inset-* 留出栏的位置。
-  permissions: []
-  # 上游 nginx 官方镜像，amd64 和 arm64 都有；上游没写最低内存，按本机空闲实测取整（实测约 24M，取 64M）。
+    sso: none
+  permissions:
+    - storage.share.music:read
+  secrets:
+    db_password:
+      generate: { bytes: 32 }
+    # 32 字节 base64，前面拼上 base64: 就是 Laravel 的 APP_KEY 格式。
+    app_key:
+      generate: { bytes: 32, encoding: base64 }
   requirements:
     arch: [amd64, arm64]
-    memory: 64M
+    memory: 512M
