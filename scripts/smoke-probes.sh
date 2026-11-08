@@ -8,7 +8,7 @@ web_assert() { grep -qi 'koel'; }   # 标准输入：SPA 首页 HTML
 koel_login() { # 登录主人账号，输出 Bearer 令牌
   local resp
   resp="$(curl -sS --noproxy '*' -b "$SMOKE_JAR" -H 'Content-Type: application/json' \
-    -d "{\"email\":\"${SMOKE_OWNER}@wonton.internal\",\"password\":\"KoelIsCool\"}" "$SMOKE_WEB_URL/api/me")" ||
+    -d "{\"email\":\"$WONTON_OWNER_EMAIL\",\"password\":\"KoelIsCool\"}" "$SMOKE_WEB_URL/api/me")" ||
     { echo "登录请求失败"; return 1; }
   local token
   token="$(jq -r '.token // empty' <<<"$resp")"
