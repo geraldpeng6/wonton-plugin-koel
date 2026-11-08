@@ -1,14 +1,14 @@
 # shellcheck shell=bash
-# Koel：sso=none——登录用应用自己的邮箱账号。上游镜像首次初始化种下写死的默认管理员
-# admin@koel.dev / KoelIsCool（没有配置项可改，README 里有说明），身份探测就用它登录。
+# Koel：sso=none——登录用应用自己的邮箱账号。init 服务把上游写死的默认管理员（admin@koel.dev /
+# KoelIsCool）的登录邮箱改成主人的内部邮箱，身份探测就用内部邮箱登录；密码默认 KoelIsCool。
 # 网页和应用接口都经核心网关（请求要带用户会话）；应用自己的接口再加 Koel 的 Bearer 令牌。
 
 web_assert() { grep -qi 'koel'; }   # 标准输入：SPA 首页 HTML
 
-koel_login() { # 登录默认管理员，输出 Bearer 令牌
+koel_login() { # 登录主人账号，输出 Bearer 令牌
   local resp
   resp="$(curl -sS --noproxy '*' -b "$SMOKE_JAR" -H 'Content-Type: application/json' \
-    -d '{"email":"admin@koel.dev","password":"KoelIsCool"}' "$SMOKE_WEB_URL/api/me")" ||
+    -d "{\"email\":\"$WONTON_OWNER_EMAIL\",\"password\":\"KoelIsCool\"}" "$SMOKE_WEB_URL/api/me")" ||
     { echo "登录请求失败"; return 1; }
   local token
   token="$(jq -r '.token // empty' <<<"$resp")"
