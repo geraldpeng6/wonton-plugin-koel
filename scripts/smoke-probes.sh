@@ -8,7 +8,7 @@ web_assert() { grep -qi 'koel'; }   # 标准输入：SPA 首页 HTML
 koel_login() { # 登录主人账号，输出 Bearer 令牌
   local resp
   resp="$(curl -sS --noproxy '*' -b "$SMOKE_JAR" -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$WONTON_OWNER_EMAIL\",\"password\":\"KoelIsCool\"}" "$SMOKE_WEB_URL/api/me")" ||
+    -d "{\"email\":\"${SMOKE_OWNER}@wonton.internal\",\"password\":\"KoelIsCool\"}" "$SMOKE_WEB_URL/api/me")" ||
     { echo "登录请求失败"; return 1; }
   local token
   token="$(jq -r '.token // empty' <<<"$resp")"
@@ -71,7 +71,7 @@ extra_check() {
   # 1) 触发找回密码（发给主人账号的内部地址；Laravel 同步发信，失败会 500）
   local owner_email
   # kit 的 probes_env 导出过 SMOKE_OWNER_EMAIL；e2e 直调没有，从实例 .env 读（read_env 两边都有）
-  owner_email="${SMOKE_OWNER_EMAIL:-$(read_env WONTON_OWNER_EMAIL 2>/dev/null)}"
+  owner_email="${SMOKE_OWNER_EMAIL:-${SMOKE_OWNER:+"${SMOKE_OWNER}@wonton.internal"}}"
   owner_email="${owner_email:-$(probes_setting WONTON_OWNER_EMAIL 2>/dev/null)}"
   [[ -n "$owner_email" ]] || { echo "拿不到 WONTON_OWNER_EMAIL（SMOKE_OWNER_EMAIL/read_env 都为空）"; return 1; }
   local code
