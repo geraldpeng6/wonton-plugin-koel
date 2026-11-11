@@ -1,6 +1,6 @@
 # 云吞插件：Koel
 
-开发流程见[插件开发指南](https://github.com/geraldpeng6/wonton-docs/blob/main/develop.md)。
+开发流程见[插件开发指南](https://github.com/wontonapp/wonton-docs/blob/main/develop.md)。
 
 把共享文件夹 `music` 里的音乐变成用户自己的流媒体音乐库：网页里按歌手、专辑浏览，建歌单，看收听统计，手机浏览器也好用。
 数据库用插件自带的 PostgreSQL；音乐目录只读，歌曲放进去后在 Koel 设置里点扫描。
