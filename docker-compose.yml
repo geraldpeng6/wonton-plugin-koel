@@ -34,7 +34,10 @@ services:
     entrypoint: ["/bin/sh", "/wonton-start.sh"]
     command: ["apache2-foreground"]
     volumes:
-      - ${WONTON_SHARE_MUSIC:?核心没有授权 music 共享文件夹}:/music:ro
+      # docker compose 的短 volume 语法会先按冒号分段再插值，${VAR:?消息} 里的冒号会数出
+      # “too many colons”（CI smoke 实测）。核心对已声明 storage.share.music:read 的插件必注入
+      # WONTON_SHARE_MUSIC，缺权限在核心自己的校验里报错，这里不需要 :? 再守一道。
+      - ${WONTON_SHARE_MUSIC}:/music:ro
       - ${WONTON_APP_DATA}/images:/var/www/html/storage/app/public/images
       - ${WONTON_APP_DATA}/search-indexes:/var/www/html/storage/search-indexes
       - ${WONTON_APP_DATA}/artifacts:/artifacts
