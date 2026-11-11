@@ -8,7 +8,7 @@ web_assert() { grep -qi 'koel'; }   # 标准输入：SPA 首页 HTML
 koel_login() { # 登录主人账号，输出 Bearer 令牌
   local resp
   resp="$(curl -sS --noproxy '*' -b "$SMOKE_JAR" -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$WONTON_OWNER_EMAIL\",\"password\":\"KoelIsCool\"}" "$SMOKE_WEB_URL/api/me")" ||
+    -d "{\"email\":\"${SMOKE_OWNER}@wonton.internal\",\"password\":\"KoelIsCool\"}" "$SMOKE_WEB_URL/api/me")" ||
     { echo "登录请求失败"; return 1; }
   local token
   token="$(jq -r '.token // empty' <<<"$resp")"
@@ -67,10 +67,20 @@ extra_check() {
     { echo "SMTP 变量不对：host=$mail_host port=$mail_port from=$mail_from"; return 1; }
   echo "SMTP 变量已注入：$mail_host:$mail_port from=$mail_from"
 
-  # 1) 触发找回密码（发给主人账号的内部地址；Laravel 同步发信，失败会 500）。
-  # init 把主人账号的登录邮箱改成 <主人>@wonton.internal（见文件头），找回密码信就发往这个核心收得到的地址。
-  owner_email="${SMOKE_OWNER}@wonton.internal"
+  # 1) 触发找回密码（发给主人账号的内部地址；Laravel 同步发信，失败会 500）
+  local owner_email
+  # kit 的 probes_env 导出过 SMOKE_OWNER_EMAIL；e2e 直调没有，从实例 .env 读（read_env 两边都有）
+  owner_email="${SMOKE_OWNER_EMAIL:-${SMOKE_OWNER:+"${SMOKE_OWNER}@wonton.internal"}}"
+  owner_email="${owner_email:-$(probes_setting WONTON_OWNER_EMAIL 2>/dev/null)}"
+  [[ -n "$owner_email" ]] || { echo "拿不到 WONTON_OWNER_EMAIL（SMOKE_OWNER_EMAIL/read_env 都为空）"; return 1; }
   token="$(koel_login)" || { echo "koel 登录失败"; return 1; }
+  local code
+  code="$(curl -sS --noproxy '*' -o /dev/null -w '%{http_code}' -b "${SMOKE_JAR:-}" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json' -H "Authorization: Bearer $token" \
+    -d "{\"email\":\"$owner_email\"}" \
+    "$SMOKE_WEB_URL/api/forgot-password")" || code=""
+  [[ "$code" == 204 ]] || { echo "找回密码请求返回 ${code:-curl 失败}（Laravel 同步发信失败会 500）"; return 1; }
+  echo "找回密码信已交给核心 SMTP（HTTP 204）"
 
   # 2) 以主人身份读主人的 Wonton 私聊，等这封信（投递成功在核心日志里静默）。
   # 等待先挂后台再触发：信可能在等待开始前就到，套件的房间等待只认开始之后的消息。
