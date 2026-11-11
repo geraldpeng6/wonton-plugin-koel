@@ -53,16 +53,17 @@ data_check() { # 从 $SMOKE_STATE 读回标记，去应用里找回带标记的�
 # 以主人身份读 Matrix 私聊里的 app.wonton.plugin_mail 消息为证。发往不存在的外部用户时 Koel
 # 出于防枚举根本不创建邮件（无 SMTP 往返），外部 550 拒收在这条触发路径上不可观测，不写假断言。
 extra_check() {
-  local koel_container mail_host mail_port mail_from mtok before_ts found json seen_room owner_email code
+  local koel_container koel_env mail_host mail_port mail_from mtok before_ts found json seen_room owner_email code
   koel_container="$(docker ps --format '{{.Names}}' | grep -E "wonton-${SMOKE_INSTANCE}--dev-koel-koel--koel$" | head -1)"
   [[ -n "$koel_container" ]] || { echo "找不到 koel 容器"; return 1; }
   declare -F owner_access_token >/dev/null ||
     { echo "需要 e2e 套件的 owner_access_token（读主人私聊拿投递证据用）"; return 1; }
 
-  # 0) 三个 SMTP 变量进了 koel 容器（compose 原名透传，.env 由启动脚本写进 MAIL_*）
-  mail_host="$(docker exec "$koel_container" printenv MAIL_HOST)" || { echo "koel 容器没有 MAIL_HOST"; return 1; }
-  mail_port="$(docker exec "$koel_container" printenv MAIL_PORT)" || { echo "koel 容器没有 MAIL_PORT"; return 1; }
-  mail_from="$(docker exec "$koel_container" printenv MAIL_FROM_ADDRESS)" || { echo "koel 容器没有 MAIL_FROM_ADDRESS"; return 1; }
+  # 0) 三个 SMTP 变量进了 koel 容器：MAIL_* 不是进程环境变量，是启动脚本写进 /var/www/html/.env 的
+  koel_env="$(docker exec "$koel_container" cat /var/www/html/.env)" || { echo "读不到 koel 容器的 .env"; return 1; }
+  mail_host="$(sed -n 's/^MAIL_HOST=//p' <<<"$koel_env")"
+  mail_port="$(sed -n 's/^MAIL_PORT=//p' <<<"$koel_env")"
+  mail_from="$(sed -n 's/^MAIL_FROM_ADDRESS=//p' <<<"$koel_env")"
   [[ "$mail_host" == "smtp.wonton.internal" && "$mail_port" == "25" &&
     "$mail_from" == "dev.koel.koel@plugins.wonton.internal" ]] ||
     { echo "SMTP 变量不对：host=$mail_host port=$mail_port from=$mail_from"; return 1; }
