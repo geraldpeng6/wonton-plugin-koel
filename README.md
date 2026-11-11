@@ -7,12 +7,19 @@
 
 ## 插件行为
 
-- 登录用 Koel 自带的邮箱账号（`sso: none`）。Koel 免费版的单点登录（Google / OIDC）和反向代理头认证
+- 登录用 Koel 自带的邮箱账号（`sso: none`），登录邮箱是主人的内部邮箱（启动脚本把上游写死的默认管理员
+  `admin@koel.dev` 改成它，已是内部邮箱时不做任何事）。Koel 免费版的单点登录（Google / OIDC）和反向代理头认证
   都是付费 Koel Plus 的功能，这里用不了；云吞网关挡在前面，未登录的请求到不了 Koel。
+- 应用发的信（邀请家人、找回密码）经核心的 SMTP 转进收件人的 Wonton 私聊：`notify` 权限给的
+  `WONTON_SMTP_HOST`、`WONTON_SMTP_PORT`、`WONTON_MAIL_FROM` 由 `wonton-start.sh` 写进 `.env` 的 `MAIL_*`，
+  不认证、不加密；收件人只能是家里的人，外部地址在 SMTP 阶段被拒收，Koel 会报发送失败。
 - 上游镜像的初始化要求配置写在 `/var/www/html/.env`（9.15.0 的 `koel-init` 不认环境变量）：
-  `wonton-start.sh` 每次启动用注入的变量生成 `.env`（幂等），然后走原 entrypoint——里面的
-  `php artisan koel:init --no-assets --no-interaction` 会跑迁移、种默认管理员（`admin@koel.dev` / `KoelIsCool`，
-  镜像写死，无配置项可改）、把 `MEDIA_PATH` 写进应用设置，全部幂等。装好后请在 Koel 设置里改密码。
+  `wonton-start.sh` 每次启动用注入的变量生成 `.env`（幂等），然后复刻上游 entrypoint 的步骤（镜像按摘要固定）：
+  `php artisan koel:init --no-scheduler` 跑迁移、种默认管理员、写应用设置——不走镜像的 `koel-init` 是因为
+  它把装不上 crontab 的主机当致命错误（`schedule:run` 的 cron 对 www-data 不可用时整个安装崩掉），
+  而本插件要定时任务的功能（播客、电台同步）本来就关着；接着用应用自带的 `php artisan tinker` 把写死的
+  默认管理员（`admin@koel.dev`，无配置项可改）的邮箱改成主人的内部邮箱，再让 Apache 开门——改名失败
+  Apache 就不启动。装好后请在 Koel 设置里改密码。
 - PHP 以镜像内置的 `www-data`（uid 33）运行，核心预建的挂载目录属主是 `PUID:PGID`：`wonton-start.sh`
   每次启动把挂载目录本身的属主改回 `www-data`（幂等，只改目录）。
 - 音乐目录只读（`storage.share.music:read`）：Koel 的网页上传要写媒体目录，用不了；歌曲放进共享文件夹后点扫描。
@@ -31,7 +38,7 @@ scripts/dev.sh install
 ```
 
 `up` 在本机起一套云吞并打印它的地址，用 `scripts/dev.sh token` 输出的用户令牌登录；`install` 列出插件要的权限，
-确认后装上并打印插件网页的地址。打开后用 `admin@koel.dev` / `KoelIsCool` 登录（首次），随后改密码、点扫描。
+确认后装上并打印插件网页的地址。打开后用主人的内部邮箱 / `KoelIsCool` 登录（首次），随后改密码、点扫描。
 
 ## 仓库里有什么
 
