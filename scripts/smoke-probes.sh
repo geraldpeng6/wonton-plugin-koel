@@ -76,8 +76,9 @@ extra_check() {
   owner_email="${owner_email:-$(probes_setting WONTON_OWNER_EMAIL 2>/dev/null)}"
   [[ -n "$owner_email" ]] || { echo "拿不到 WONTON_OWNER_EMAIL（SMOKE_OWNER_EMAIL/read_env 都为空）"; return 1; }
   local code
-  code="$(curl -sS --noproxy '*' -o /dev/null -w '%{http_code}' \
-    -H 'Content-Type: application/json' -d "{\"email\":\"$owner_email\"}" \
+  code="$(curl -sS --noproxy '*' -o /dev/null -w '%{http_code}' -b "${SMOKE_JAR:-}" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json' \
+    -d "{\"email\":\"$owner_email\"}" \
     "$SMOKE_WEB_URL/api/forgot-password")" || { echo "找回密码请求失败"; return 1; }
   [[ "$code" == 204 ]] || { echo "找回密码请求返回 $code（Laravel 同步发信失败会 500）"; return 1; }
   echo "找回密码信已交给核心 SMTP（HTTP 204）"
