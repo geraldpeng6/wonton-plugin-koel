@@ -117,10 +117,10 @@ x-wonton:
   id: dev.koel.koel
   version: 0.2.0
   kind: app
-  title: { en: Koel }
+  title: { zh: 网页音乐库（Koel）, en: Web Music Player (Koel) }
   description:
-    zh: 把共享文件夹里的音乐变成你自己的流媒体音乐库
-    en: Turn the music in your shared folder into your own streaming library
+    zh: 网页做得最精致的自家音乐库：按歌手、专辑听歌、建歌单，还能看收听统计，家里人可以各开账号。适合主要在网页上听歌的人。
+    en: "A home music library with the most polished web player: listen by artist and album, build playlists, see your listening stats, and invite family to their own accounts. Best if you mostly listen in the browser."
   icon: icon.svg
   notices: [NOTICE]
   screenshots: [screenshots/home.png, screenshots/album.png, screenshots/player.png]
@@ -133,7 +133,7 @@ x-wonton:
     en: [Music]
   about:
     zh: |
-      把共享文件夹里的音乐整理成自己的流媒体音乐库：按歌手、专辑浏览，建歌单，看收听统计。网页在手机上也好用。
+      把共享文件夹里的音乐变成自己的在线音乐库：按歌手、专辑浏览，建歌单，看收听统计。网页在手机上也好用。
 
       第一次打开用你的内部邮箱登录（<用户名>@wonton.internal），默认密码 KoelIsCool。登录后请立即在设置里改密码；网关挡在前面，改密码之前只有你打得开登录页。
 
@@ -143,7 +143,7 @@ x-wonton:
 
       播客、网络电台、Last.fm、MusicBrainz 元数据这些要连外网的功能默认关闭；插件不申请出网权限。单点登录（Google / OIDC）和反向代理认证是 Koel Plus 的付费功能，免费版用不了。
     en: |
-      Turn the music in your shared folder into your own streaming library: browse by artist and album, build playlists, and see listening statistics. The web app works well on phones.
+      Turn the music in your shared folder into your own online library: browse by artist and album, build playlists and see your listening stats. The web player works well on phones too.
 
       The first sign-in uses your internal Wonton address (<username>@wonton.internal); the default password is KoelIsCool. Change the password right away in Settings; the gateway sits in front, so before the change only you can reach the login page.
 
