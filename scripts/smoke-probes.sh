@@ -95,7 +95,9 @@ extra_check() {
     kill "$wp" 2>/dev/null
     wait "$wp" 2>/dev/null
     rm -f "$room_out"
-    { echo "找回密码请求失败或没成功（HTTP ${code:-curl 失败}；Laravel 同步发信失败会 500）"; return 1; }
+    # 同步发信失败时把核心日志里 SMTP 相关行带出来，省得实例清掉后无法回查。
+    docker logs "wonton-${SMOKE_INSTANCE}--core" 2>&1 | grep -iE "smtp|mail|550|421|reject" | tail -20 || true
+    { echo "找回密码请求失败或没成功（HTTP ${code:-curl 失败}；Laravel 同步发信失败会 500）"; rm -f "$room_out"; return 1; }
   fi
   echo "找回密码信已交给核心 SMTP（HTTP 204）"
   if wait "$wp"; then
