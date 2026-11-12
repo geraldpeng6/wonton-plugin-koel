@@ -79,7 +79,11 @@ extra_check() {
     -H 'Content-Type: application/json' -H 'Accept: application/json' -H "Authorization: Bearer $token" \
     -d "{\"email\":\"$owner_email\"}" \
     "$SMOKE_WEB_URL/api/forgot-password")" || code=""
-  [[ "$code" == 204 ]] || { echo "找回密码请求返回 ${code:-curl 失败}（Laravel 同步发信失败会 500）"; return 1; }
+  [[ "$code" == 204 ]] || {
+    # 同步发信失败时把核心日志里 SMTP 相关行带出来，省得实例清掉后无法回查。
+    docker logs "wonton-${SMOKE_INSTANCE}--core" 2>&1 | grep -iE "smtp|mail|550|421|reject" | tail -20 || true
+    { echo "找回密码请求返回 ${code:-curl 失败}（Laravel 同步发信失败会 500）"; return 1; }
+  }
   echo "找回密码信已交给核心 SMTP（HTTP 204）"
 
   # 2) 以主人身份读主人的 Wonton 私聊，等这封信（投递成功在核心日志里静默）。
