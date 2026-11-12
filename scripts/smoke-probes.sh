@@ -53,11 +53,9 @@ data_check() { # 从 $SMOKE_STATE 读回标记，去应用里找回带标记的�
 # 以主人身份读 Matrix 私聊里的 app.wonton.plugin_mail 消息为证。发往不存在的外部用户时 Koel
 # 出于防枚举根本不创建邮件（无 SMTP 往返），外部 550 拒收在这条触发路径上不可观测，不写假断言。
 extra_check() {
-  local koel_container koel_env mail_host mail_port mail_from mtok before_ts found json seen_room owner_email code
+  local koel_container koel_env mail_host mail_port mail_from owner_email token code room_out wp
   koel_container="$(docker ps --format '{{.Names}}' | grep -E "wonton-${SMOKE_INSTANCE}--dev-koel-koel--koel$" | head -1)"
   [[ -n "$koel_container" ]] || { echo "找不到 koel 容器"; return 1; }
-  declare -F owner_access_token >/dev/null ||
-    { echo "需要 e2e 套件的 owner_access_token（读主人私聊拿投递证据用）"; return 1; }
 
   # 0) 三个 SMTP 变量进了 koel 容器：MAIL_* 不是进程环境变量，是启动脚本写进 /var/www/html/.env 的
   koel_env="$(docker exec "$koel_container" cat /var/www/html/.env)" || { echo "读不到 koel 容器的 .env"; return 1; }
@@ -69,42 +67,31 @@ extra_check() {
     { echo "SMTP 变量不对：host=$mail_host port=$mail_port from=$mail_from"; return 1; }
   echo "SMTP 变量已注入：$mail_host:$mail_port from=$mail_from"
 
-  # 1) 触发找回密码（发给主人账号的内部地址；Laravel 同步发信，失败会 500）
-  local owner_email
-  # kit 的 probes_env 导出过 SMOKE_OWNER_EMAIL；e2e 直调没有，从实例 .env 读（read_env 两边都有）
-  owner_email="${SMOKE_OWNER_EMAIL:-${SMOKE_OWNER:+"${SMOKE_OWNER}@wonton.internal"}}"
-  owner_email="${owner_email:-$(probes_setting WONTON_OWNER_EMAIL 2>/dev/null)}"
-  [[ -n "$owner_email" ]] || { echo "拿不到 WONTON_OWNER_EMAIL（SMOKE_OWNER_EMAIL/read_env 都为空）"; return 1; }
-  local code token
+  # 1) 触发找回密码（发给主人账号的内部地址；Laravel 同步发信，失败会 500）。
+  # init 把主人账号的登录邮箱改成 <主人>@wonton.internal（见文件头），找回密码信就发往这个核心收得到的地址。
+  owner_email="${SMOKE_OWNER}@wonton.internal"
   token="$(koel_login)" || { echo "koel 登录失败"; return 1; }
+
+  # 2) 以主人身份读主人的 Wonton 私聊，等这封信（投递成功在核心日志里静默）。
+  # 等待先挂后台再触发：信可能在等待开始前就到，套件的房间等待只认开始之后的消息。
+  room_out="$(mktemp)"
+  probes_owner_room_wait 150 "Koel" >"$room_out" &
+  wp=$!
   code="$(curl -sS --noproxy '*' -o /dev/null -w '%{http_code}' -b "${SMOKE_JAR:-}" \
     -H 'Content-Type: application/json' -H 'Accept: application/json' -H "Authorization: Bearer $token" \
     -d "{\"email\":\"$owner_email\"}" \
-    "$SMOKE_WEB_URL/api/forgot-password")" || { echo "找回密码请求失败"; return 1; }
-  [[ "$code" == 204 ]] || { echo "找回密码请求返回 $code（Laravel 同步发信失败会 500）"; return 1; }
+    "$SMOKE_WEB_URL/api/forgot-password")" || code=""
+  if [[ "$code" != 204 ]]; then
+    kill "$wp" 2>/dev/null
+    wait "$wp" 2>/dev/null
+    rm -f "$room_out"
+    { echo "找回密码请求失败或没成功（HTTP ${code:-curl 失败}；Laravel 同步发信失败会 500）"; return 1; }
+  fi
   echo "找回密码信已交给核心 SMTP（HTTP 204）"
-
-  # 2) 以主人身份读私聊，等 app.wonton.plugin_mail 消息（投递成功在核心日志里静默）
-  mtok="$(owner_access_token)" || { echo "主人 Matrix 登录失败（读私聊拿投递证据用）"; return 1; }
-  before_ts="$(date +%s000)"
-  found=""
-  for _ in $(seq 1 50); do
-    seen_room="$(matrix_curl -H "Authorization: Bearer $mtok" \
-      "http://tuwunel.wonton.internal:8008/_matrix/client/v3/joined_rooms" 2>/dev/null | jq -r '.joined_rooms[]' 2>/dev/null)" || { sleep 3; continue; }
-    while IFS= read -r room; do
-      [[ -n "$room" ]] || continue
-      json="$(matrix_curl -H "Authorization: Bearer $mtok" \
-        "http://tuwunel.wonton.internal:8008/_matrix/client/v3/rooms/$(printf '%s' "$room" | sed 's/!/%21/g;s/:/%3A/g')/messages?dir=b&limit=30" 2>/dev/null)" || continue
-      if jq -e --arg p "dev.koel.koel" --argjson t "$before_ts" '.chunk[] |
-          select(.type == "m.room.message" and .origin_server_ts >= $t and
-          .content["app.wonton.plugin_mail"].plugin_id == $p)' <<<"$json" >/dev/null 2>&1; then
-        found="$room"
-        break
-      fi
-    done <<<"$seen_room"
-    [[ -n "$found" ]] && break
-    sleep 3
-  done
-  [[ -n "$found" ]] || { echo "主人的 Wonton 私聊里没有 Koel 的找回密码信（150 秒）"; return 1; }
-  echo "核心已把 Koel 的信投进主人的 Wonton 私聊（房间 $found）"
+  if wait "$wp"; then
+    cat "$room_out"
+    rm -f "$room_out"
+  else
+    { echo "Koel 的找回密码信没进主人的 Wonton 私聊：$(cat "$room_out")"; rm -f "$room_out"; return 1; }
+  fi
 }
