@@ -73,6 +73,17 @@ extra_check() {
   owner_email="${SMOKE_OWNER_EMAIL:-${SMOKE_OWNER:+"${SMOKE_OWNER}@wonton.internal"}}"
   owner_email="${owner_email:-$(probes_setting WONTON_OWNER_EMAIL 2>/dev/null)}"
   [[ -n "$owner_email" ]] || { echo "拿不到 WONTON_OWNER_EMAIL（SMOKE_OWNER_EMAIL/read_env 都为空）"; return 1; }
+  # 触发前现场取证（负责人排查 koel 500）：核心容器对 Mailpit 别名的解析、网络视图。
+  local corec_e
+  corec_e="$(docker ps --format '{{.Names}}' | grep -E "wonton-${SMOKE_INSTANCE}--core$" | head -1)"
+  if [[ -n "$corec_e" ]]; then
+    echo "=== DNS 现场取证（发信前）==="
+    echo "--- getent hosts mailpit.wonton.internal:"; docker exec "$corec_e" getent hosts mailpit.wonton.internal 2>&1 || true
+    echo "--- /etc/resolv.conf:"; docker exec "$corec_e" cat /etc/resolv.conf 2>&1 || true
+    echo "--- 核心容器 Networks:"; docker inspect "$corec_e" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} aliases={{$v.Aliases}} {{end}}' 2>&1 || true
+    echo "--- core 网络 mailpit 接入:"; docker network inspect "wonton-${SMOKE_INSTANCE}--core_default" --format '{{range .Containers}}{{.Name}} {{end}}{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>&1 | head -2 || true
+    echo "=== 取证结束 ==="
+  fi
   token="$(koel_login)" || { echo "koel 登录失败"; return 1; }
   local code
   code="$(curl -sS --noproxy '*' -o /dev/null -w '%{http_code}' -b "${SMOKE_JAR:-}" \
