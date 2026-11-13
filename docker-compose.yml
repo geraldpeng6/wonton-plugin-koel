@@ -76,7 +76,7 @@ configs:
       MEDIA_PATH=/music
       ARTIFACTS_PATH=/artifacts
       # 发信走核心的 SMTP（notify 权限给的变量），信转进收件人的 Wonton 私聊。服务器宣告 STARTTLS
-      # 但明文照收（ADR-0056）；不填用户名密码 Laravel 就不发 AUTH，任何一方填了认证反而失败。
+      # 但明文照收；不填用户名密码 Laravel 就不发 AUTH，任何一方填了认证反而失败。
       # ENCRYPTION=null 关不掉 Symfony Mailer 的机会主义 TLS 升级，明文由启动脚本补的 auto_tls=false 保证。
       MAIL_MAILER=smtp
       MAIL_HOST=${WONTON_SMTP_HOST:?核心没有注入 SMTP 服务器地址}
@@ -94,7 +94,7 @@ configs:
       WONTONENV
       # Symfony Mailer 6.4+ 的 smtp 传输默认机会主义升级 TLS（auto_tls 默认开，Laravel 的
       # MAIL_ENCRYPTION=null 管不到它）：服务器一宣告 STARTTLS 就升级。核心给 Mailpit 配的是自签
-      # 证书，没法交给插件信任（ADR-0056），PHP 默认验签，握手必败，Laravel 发信直接 500。内网
+      # 证书，插件拿不到它也没处信任，PHP 默认验签，握手必败，Laravel 发信直接 500。内网
       # 插件网络本来就隔离，走明文：给 smtp mailer 补 auto_tls=false。上游没有环境变量能关掉它，
       # 只能在启动时改这一行；镜像按摘要固定，上游动了锚点行会在这里失败即停，换 pin 时一起看。
       grep -q "'auto_tls'" config/mail.php ||
